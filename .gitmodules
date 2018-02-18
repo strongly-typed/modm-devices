@@ -6,3 +6,7 @@
 	path = tools/generator/cmsis-5
 	url = https://github.com/ARM-software/CMSIS_5.git
 	shallow = true
+[submodule "tools/generator/cmsis-svd"]
+	path = tools/generator/cmsis-svd
+	url = https://github.com/posborne/cmsis-svd.git
+	shallow = true
