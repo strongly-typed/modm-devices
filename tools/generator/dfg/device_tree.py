@@ -40,6 +40,11 @@ class DeviceTree:
             tree.children.append(cchild)
         return tree
 
+    def addId(self, did):
+        self.ids.append(did)
+        for child in self.children:
+            child.addId(did)
+
     def setAttributes(self, *args):
         if isinstance(args[0], list) and isinstance(args[1], dict):
             for k in args[0]:
@@ -63,18 +68,19 @@ class DeviceTree:
         if key in self.attributes:
             del self.attributes[key]
 
+    def _addChild(self, pos, child):
+        child.parent = self
+        child.ids = self.ids.copy()
+        self.children.insert(pos, child)
+
     def addChild(self, name):
         element = DeviceTree(name)
-        element.parent = self
-        element.ids = self.ids.copy()
-        self.children.append(element)
+        self._addChild(-1, element)
         return element
 
     def prependChild(self, name):
         element = DeviceTree(name)
-        element.parent = self
-        element.ids = self.ids.copy()
-        self.children.insert(0, element)
+        self._addChild(0, element)
         return element
 
     def setValue(self, value):

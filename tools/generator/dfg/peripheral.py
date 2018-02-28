@@ -3,20 +3,23 @@
 # Copyright (c)      2016, Fabian Greif
 # All rights reserved.
 
-class Peripheral():
+from .device_tree import DeviceTree
+from .register import Register
+
+class Peripheral(DeviceTree):
     """ Peripheral
     Represents the names and masks of the peripherals control and data registers
     and methods for smart comparison.
     """
 
-    def __init__(self, name=None, registers=None):
-        self.name = name
-        if registers == None:
-            registers = []
-        self.registers = registers
+    def __init__(self, name):
+        super().__init__(name)
+        self.addSortKey(lambda r: (int(r["offset"]), int(r["size"])))
 
-    def addRegister(self, register):
-        self.registers.append(register)
+    def addRegister(self, pos, name, size):
+        reg = Register(pos, name, size)
+        self._addChild(-1, reg)
+        return reg
 
     def getComparisonDict(self, other):
         pass
@@ -47,29 +50,9 @@ class Peripheral():
         return comparision_dict
 
     def isEmpty(self):
-        return len(self.registers) == 0
+        return len(self.children) == 0
 
-    def __eq__(self, other):
-        if isinstance(other, Peripheral):
-            comp = self.getComparisonPeripheral(other)
-            if comp['self_delta'].isEmpty() and comp['other_delta'].isEmpty():
-                return True
-            return False
-        return NotImplemented
-
-    def __hash__(self):
-        return hash(self.name + str(self.registers))
-
-    def __ne__(self, other):
-        result = self.__eq__(other)
-        if result is NotImplemented:
-            return result
-        return not result
-
-    def __repr__(self):
-        return "Peripheral(" + str(self.name) + ")"
-
-    def __str__(self):
+    def _ascii(self):
         s = "\n Peripheral(\n\t{'name': '" + str(self.name) + "',\n"
         s += "\t'registers': ["
         st = ""
