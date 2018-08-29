@@ -6,6 +6,7 @@
 import os
 import re
 import logging
+from collections import defaultdict
 
 from ..device_tree import DeviceTree
 from ..input.xml import XMLReader
@@ -247,6 +248,73 @@ class STMDeviceTree:
                 rafs.append( (driver, instance, name) )
             return rafs
 
+        dma_dumped = []
+        dma_streams = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        requests = dmaFile.query('//RefParameter[@Name="Request"]/PossibleValue/@Comment')
+        if did.family == "h7": requests.insert(54, "Reserved"); # Secret NSA peripheral
+        for sig in dmaFile.query('//ModeLogicOperator[@Name="XOR"]/Mode'):
+            name = rname = sig.get("Name")
+            parent = sig.getparent().getparent().get("Name")
+            instance = parent.split("_")[0][3:]
+            parent = parent.split("_")[1]
+
+            request = dmaFile.query(f'//RefMode[@Name="{name}"]')[0]
+            def rv(param, default=[]):
+                vls = request.xpath(f'./Parameter[@Name="{param}"]/PossibleValue/text()')
+                if not len(vls): vls = default;
+                return vls
+
+            name = name.lower().split(":")[0]
+            if name == "memtomem":
+                continue
+            # Several corrections
+            name = name.replace("spdif_rx", "spdifrx")
+            if name.startswith("dac") and "_" not in name: name = f"dac_{name}";
+            if any(name == n for n in ["sdio", "sdmmc2", "sdmmc1"]): continue
+            if len(name.split("_")) < 2: name = f"{name}_default";
+            driver, inst, name = split_af(name)
+
+            if "[" in parent:
+                channel = requests.index(rname)
+                stream = instance = 0
+                p["dma_naming"] = (None, "request", "signal")
+            elif "Stream" in parent:
+                channel = rv("Channel", ["software"])[0].replace("DMA_CHANNEL_", "")
+                stream = parent.replace("Stream", "")
+                p["dma_naming"] = ("stream", "channel", "signal")
+            elif rv("Request"):
+                channel = rv("Request", ["software"])[0].replace("DMA_REQUEST_", "")
+                stream = parent.replace("Channel", "")
+                p["dma_naming"] = ("channel", "request", "signal")
+            else:
+                channel = parent.replace("Channel", "")
+                stream = channel
+                p["dma_naming"] = (None, "channel", "signal")
+
+            if driver is None: # peripheral is not part of this device
+                dma_dumped.append( (instance, stream, name) )
+                continue
+            mode = [v[4:].lower() for v in rv("Mode")]
+            for sname in ([None] if name == "default" else name.split("/")):
+                signal = {
+                    "driver": driver,
+                    "name": sname,
+                    "direction": [v[4:].replace("PERIPH", "p").replace("MEMORY", "m").replace("_TO_", "2") for v in rv("Direction")],
+                    "mode": mode,
+                    "increase": "ENABLE" in rv("PeriphInc", ["DMA_PINC_ENABLE"])[0],
+                }
+                if inst: signal["instance"] = inst;
+                dma_streams[instance][stream][channel].append(signal)
+                # print(instance, stream, channel)
+                # print(signal)
+
+        # if p["dma_naming"][1] == "request":
+        #     print(did, dmaFile.filename)
+        p["dma"] = dma_streams
+        if len(dma_dumped):
+            for instance, stream, name in sorted(dma_dumped):
+                LOGGER.debug(f"DMA{instance}#{stream}: dumping {name}")
+
         if did.family == "f1":
             grouped_f1_signals = gpioFile.compactQuery('//GPIO_Pin/PinSignal/@Name')
 
@@ -360,6 +428,9 @@ class STMDeviceTree:
                 if e["name"] == "core":
                     # place the core at the very beginning
                     return ("aaaaaaa", e["type"])
+                if e["name"] == "dma":
+                    # place the dma before the gpio
+                    return ("yyyyyyy", e["type"])
                 if e["name"] == "gpio":
                     # place the gpio at the very end
                     return ("zzzzzzz", e["type"])
@@ -385,18 +456,17 @@ class STMDeviceTree:
                 modules[m+h][4].append(i)
 
         # add all other modules
-        gpio_version = "stm32"
         for name, hardware, features, protocols, instances in modules.values():
-            if name == "gpio":
-                gpio_version = hardware
-                continue
-
             driver = tree.addChild("driver")
             driver.setAttributes("name", name, "type", hardware)
+            if name == "gpio":
+                STMDeviceTree.addGpioToNode(p, driver)
+                continue
+
             def driver_sort_key(e):
                 if e.name == "feature":
-                    return (0, 0, e["value"])
-                return (1, int(e["value"]), "")
+                    return (0, 0, e.get("value", "AAA"))
+                return (100, int(e.get("value", 0)), "")
             driver.addSortKey(driver_sort_key)
             for f in features:
                 feat = driver.addChild("feature")
@@ -410,20 +480,46 @@ class STMDeviceTree:
                     inst = driver.addChild("instance")
                     inst.setValue(i[len(name):])
 
-        # GPIO driver
-        gpio_driver = tree.addChild("driver")
-        gpio_driver.setAttributes("name", "gpio", "type", gpio_version)
+            if name == "dma":
+                STMDeviceTree.addDmaToNode(p, driver)
 
+        return tree
+
+    @staticmethod
+    def addDmaToNode(p, driver):
+        naming = p["dma_naming"]
+        driver.addSortKey(lambda e: (int(e.get("instance", 0)), int(e.get("position", 0))))
+        for instance, streams in p["dma"].items():
+            inst = driver.addChild((naming[1] if naming[0] is None else naming[0]) + "s")
+            if naming[0] is not None or naming[1] == "channel":
+                inst.setAttribute("instance", instance)
+            inst.addSortKey(lambda e: (e.name, int(e["position"])))
+            for stream, channels in streams.items():
+                if naming[0] is not None:
+                    stre = inst.addChild(naming[0])
+                    stre.setAttribute("position", stream)
+                    stre.addSortKey(lambda e: int(e["position"]))
+                else:
+                    stre = inst
+                for channel, signals in channels.items():
+                    chan = stre.addChild(naming[1])
+                    chan.setAttribute("position", channel)
+                    chan.addSortKey(lambda e: (e["driver"], e.get("instance", ""), e.get("name", "")))
+                    for signal in signals:
+                        sign = chan.addChild(naming[2])
+                        sign.setAttributes(["driver", "instance"], signal)
+                        if signal["name"]:
+                            sign.setAttributes(["name"], signal)
+
+    @staticmethod
+    def addGpioToNode(p, gpio_driver):
         if p["id"]["family"] == "f1":
             # Add the remap group tree
             for remap in p["remaps"].values():
                 if len(remap["groups"]) == 0: continue;
                 remap_ch = gpio_driver.addChild("remap")
-                if remap["driver"] is not None:
-                    remap_ch.setAttributes(["driver"], remap)
-                if remap["instance"] is not None:
-                    remap_ch.setAttributes(["instance"], remap)
-                remap_ch.setAttributes(["position", "mask"], remap)
+                keys = [k for k in ["driver", "instance"] if remap[k] is not None]
+                remap_ch.setAttributes(keys + ["position", "mask"], remap)
                 remap_ch.addSortKey(lambda e: int(e["id"]))
 
                 for group, pins in remap["groups"].items():
@@ -437,18 +533,18 @@ class STMDeviceTree:
 
         # Sort these things
         def sort_gpios(e):
-            if e["driver"] is None:
-                return (100, "", 0, e["port"], int(e["pin"]))
+            if "driver" in e:
+                return (int(e["position"]), e["driver"], int(e.get("instance", 0)), "", 0)
             else:
-                return (int(e["position"]), e["driver"], int(0 if e["instance"] is None else e["instance"]), "", 0)
+                return (100, "", 0, e["port"], int(e["pin"]))
         gpio_driver.addSortKey(sort_gpios)
 
         for port, pin, signals in p["gpios"]:
             pin_driver = gpio_driver.addChild("gpio")
             pin_driver.setAttributes("port", port, "pin", pin)
-            pin_driver.addSortKey(lambda e: (int(e["af"]) if e["af"] is not None else -1,
-                                             e["driver"] if e["driver"] is not None else "",
-                                             e["instance"] if e["instance"] is not None else "",
+            pin_driver.addSortKey(lambda e: (int(e.get("af", -1)),
+                                             e.get("driver", ""),
+                                             e.get("instance", ""),
                                              e["name"]))
             # add all signals
             for s in signals:
@@ -462,9 +558,6 @@ class STMDeviceTree:
                 if driver:   af.setAttributes("driver", driver);
                 if instance: af.setAttributes("instance", instance);
                 af.setAttributes("name", name)
-
-        return tree
-
 
     @staticmethod
     def addDeviceAttributesToNode(p, node, name):
