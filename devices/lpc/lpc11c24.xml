@@ -16,7 +16,8 @@
     <!-- Core Driver -->
     <driver name="core" type="cortex-m0">
       <memory name="flash" access="rx" start="0x00000000" size="32768"/>
-      <memory name="ram" access="rwx" start="0x10000100" size="8192"/>
+      <!-- Faked until linkerscript does not use RAM used by CAN_API: -->
+      <memory name="ram" access="rwx" start="0x10000100" size="7936"/>
       <vector position="0" name="WAKEUP0"/>
       <vector position="1" name="WAKEUP1"/>
       <vector position="2" name="WAKEUP2"/>
@@ -66,7 +67,7 @@
       <gpio port="0" pin="3"  func="Gpio"                    bits="mode,hys,od"/>
       <gpio port="0" pin="4"  func="Gpio,I2c"                bits="i2c_mode"/>
       <gpio port="0" pin="5"  func="Gpio,I2c"                bits="i2c_mode"/>
-      <gpio port="0" pin="6"  func="Gpio,Reserved,Spi0"      bits="mode,hys,od"/>
+      <gpio port="0" pin="6"  func="Gpio,Spi0"               bits="mode,hys,od"/>
       <gpio port="0" pin="7"  func="Gpio,Uart"               bits="mode,hys,od"/> <!-- What peripheral does CTS (=FUNC 0x1) belong to? -->
       <gpio port="0" pin="8"  func="Gpio,Spi0,Timer16_0"     bits="mode,hys,od"/>
       <gpio port="0" pin="9"  func="Gpio,Spi0,Timer16_0"     bits="mode,hys,od"/>
@@ -78,8 +79,12 @@
       <gpio port="1" pin="3"  func="Swd,Gpio,Adc,Timer32_1"      bits="mode,hys,admode,od" define="SWDIO_PIO1_3" />
       <gpio port="1" pin="4"  func="Gpio,Adc,Timer32_1"          bits="mode,hys,admode,od"/>
       <gpio port="1" pin="5"  func="Gpio,Uart,Timer32_0"         bits="mode,hys,od"/>
-      <gpio port="1" pin="6"  func="Gpio,Uart,Timer32_0"         bits="mode,hys,od"/>
-      <gpio port="1" pin="7"  func="Gpio,Uart,Timer32_0"         bits="mode,hys,od"/>
+      <gpio port="1" pin="6"  func="Gpio,Uart,Timer32_0"         bits="mode,hys,od">
+        <signal af="1" driver="uart" instance="1" name="rx"/>
+      </gpio>
+      <gpio port="1" pin="7"  func="Gpio,Uart,Timer32_0"         bits="mode,hys,od">
+        <signal af="1" driver="uart" instance="1" name="tx"/>
+      </gpio>
       <gpio port="1" pin="8"  func="Gpio,Timer16_1"              bits="mode,hys,od"/>
       <gpio port="1" pin="9"  func="Gpio,Timer16_1"              bits="mode,hys,od"/>
       <gpio port="1" pin="10" func="Gpio,Adc,Timer16_1"          bits="mode,hys,admode,od"/>
