@@ -60,6 +60,9 @@
     <driver name="can"  type="lpc">
       <instance value="1"/>
     </driver>
+    <driver name="adc"  type="lpc">
+      <instance value="1"/>
+    </driver>
     <driver name="gpio" type="lpc">
       <!--<gpio port="0" pin="0" func="Reset,Gpio" bits="mode,hys,od"/>-->
       <gpio port="0" pin="1"  func="Gpio,ClockOutput,Timer32_0" bits="mode,hys,od"/>
